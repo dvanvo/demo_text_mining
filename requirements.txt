@@ -1,0 +1,8 @@
+streamlit
+langchain 
+keybert 
+networkx 
+python-docx
+py-vncorenlp
+vncorenlp
+wordcloud
