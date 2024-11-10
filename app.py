@@ -1,7 +1,7 @@
 import streamlit as st
 from keybert import KeyBERT
 from docx import Document
-from sklearn.feature_extraction.text import CountVectorizer,TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import itertools
 import os
@@ -15,8 +15,9 @@ from itertools import combinations
 import matplotlib.pyplot as plt
 import numpy as np
 from wordcloud import WordCloud
-from matplotlib import use  
-from sklearn.cluster import KMeans
+from matplotlib import use 
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # Streamlit start
 st.set_page_config(page_title="Summary & Keywords Extraction", layout="wide")
@@ -44,9 +45,7 @@ def load_vncorenlp_model():
     return model
 
 model = load_vncorenlp_model()
-# Nhập đường dẫn tới thư mục chứa các tệp .docx
-folder_path = r"D:/CodePy/txtmining/1vitinh/"
-
+ 
 # Stopwords Vietnamese
 stopwords_file  = r"D:/CodePy/demo_text_mining/vietnamese-stopwords.txt"
  
@@ -58,19 +57,43 @@ except FileNotFoundError:
     st.error("File stopwords does not exist.")
     STOPWORDS = []
 
-#Show các file trong thư mục
-def list_file(folder_path):
-    print(f"Danh sách các file: ")
-    for file_name in os.listdir(folder_path):
-        print(f"           {file_name}")
-
-list_file(folder_path)
-
 #Read file docx
 def read_docx_file(file_path): 
     doc = Document(file_path)
     text = " ".join([para.text for para in doc.paragraphs])
     return text
+
+#Ham tach cau
+# def preprocess_sentences(text):
+#     #sentences = text.split('.')  # Basic sentence split; adjust as needed.
+#     sentences = re.split(r'(?<=[.!?])\s+', text)
+#     return [sentence.strip() for sentence in sentences if sentence]
+
+  
+# #Tinh khoang cach - do tuong tu giua cac cau
+# def compute_similarity(sentences):
+#     vectorizer = TfidfVectorizer().fit_transform(sentences)
+#     similarity_matrix = cosine_similarity(vectorizer)
+#     return similarity_matrix
+
+# #Sep hang - tinh diem 
+# def rank_sentences(similarity_matrix):
+#     nx_graph = nx.from_numpy_array(similarity_matrix)
+#     scores = nx.pagerank(nx_graph)
+#     return scores
+
+# #Tom tat van ban - theo tỉ % so cau ; mặc định tóm tắt 30%
+# def summarize(text, top_percent=0.3):
+#     sentences = preprocess_sentences(text)
+#     similarity_matrix = compute_similarity(sentences)
+#     scores = rank_sentences(similarity_matrix)
+    
+#     # Dua vao top_percent => tinh ra so cau can lay tom tat
+#     top_n = max(1, int(len(sentences) * top_percent))
+    
+#     ranked_sentences = sorted(((scores[i], s) for i, s in enumerate(sentences)), reverse=True)
+#     summary = " ".join([s for _, s in ranked_sentences[:top_n]])
+#     return summary 
 
 # Word segment VnCoreNLP
 def tokenize_and_filter(text): 
@@ -87,7 +110,99 @@ def tokenize_and_filter(text):
     
     return filtered_text  # Return list tokens
 
+#Tach cau
+def preprocess_sentences(text): 
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    return [sentence.strip() for sentence in sentences if sentence]
+  
+
+def compute_word_vectors(tokenized_sentences):
+    all_words = [" ".join(sentence) for sentence in tokenized_sentences]
+    vectorizer = TfidfVectorizer().fit(all_words)  # Tạo TF-IDF dựa trên tất cả các từ trong văn bản
+    
+    # Tính vector TF-IDF cho từng từ trong mỗi câu
+    word_vectors = []
+    for sentence in tokenized_sentences:
+        vectors = vectorizer.transform(sentence).toarray()  # Vector hóa từng từ trong câu
+        word_vectors.append(vectors)
+    
+    return word_vectors
+
+# Tính khoảng cách giữa các câu bằng cách lấy trung bình khoảng cách giữa các từ
+def compute_sentence_similarity(word_vectors):
+    num_sentences = len(word_vectors)
+    similarity_matrix = np.zeros((num_sentences, num_sentences))
+    
+    for i in range(num_sentences):
+        for j in range(num_sentences):
+            if i != j:
+                # Tính khoảng cách cosine giữa các từ trong hai câu
+                word_similarities = cosine_similarity(word_vectors[i], word_vectors[j])
+                # Tính khoảng cách giữa hai câu bằng cách lấy trung bình khoảng cách giữa các từ
+                similarity_matrix[i][j] = word_similarities.mean()
+    
+    return similarity_matrix
+
+# def pagerank(graph, damping_factor=0.15, max_iterations=100, tol=1.0e-6):
+#     n = graph.shape[0]
+#     rank = np.ones(n) / n  # Khởi tạo điểm PageRank ban đầu đều nhau
+#     for _ in range(max_iterations):
+#         new_rank = np.ones(n) * (damping_factor / n) + (1 - damping_factor) * graph.T.dot(rank / np.maximum(graph.sum(axis=1), 1))
+#         if np.linalg.norm(new_rank - rank, ord=1) < tol:  # Kiểm tra độ hội tụ
+#             break
+#         rank = new_rank
+#     return rank
+
+def pagerank(graph, damping_factor=0.15, max_iterations=100, tol=1.0e-6):
+    n = graph.shape[0]
+    rank = np.ones(n) / n  # Initialize PageRank scores evenly
+    degree = graph.sum(axis=1)  # Calculate the degree of each node (sentence)
+    
+    for _ in range(max_iterations):
+        # Calculate new rank
+        new_rank = np.ones(n) * (damping_factor / n) + (1 - damping_factor) * graph.T.dot(rank * degree) / np.maximum(degree, 1)
+        if np.linalg.norm(new_rank - rank, ord=1) < tol:  # Check for convergence
+            break
+        rank = new_rank
+    return rank
+
+#Xây dựng đồ thị và tính điểm cho các câu dựa trên ma trận khoảng cách
+def rank_sentences(similarity_matrix):
+    scores = pagerank(similarity_matrix)
+    return scores
+
+def summarize(text, top_percent=0.3):
+    tokenized_sentences = preprocess_sentences(text)
+    word_vectors = compute_word_vectors(tokenized_sentences)
+    similarity_matrix = compute_sentence_similarity(word_vectors)
+    scores = rank_sentences(similarity_matrix)
+    
+    # Tính số lượng câu cần lấy dựa trên tỉ lệ top_percent
+    top_n = max(1, int(len(tokenized_sentences) * top_percent))
+    
+    # Xếp hạng câu dựa trên điểm PageRank
+    ranked_sentences = sorted(((scores[i], " ".join(sentence)) for i, sentence in enumerate(tokenized_sentences)), reverse=True)
+    summary = " ".join([s for _, s in ranked_sentences[:top_n]])
+    return summary
+
+
 #Built graph, link tokens together
+
+#Tao ma tran
+
+#Tinh khoang cach
+#  
+def compute_cosine_distance(point1, point2):
+    norm1 = np.linalg.norm(point1)
+    norm2 = np.linalg.norm(point2) 
+ 
+    # Tránh chia cho 0
+    if norm1 == 0 or norm2 == 0:
+        return 0  # Khoảng cách tối đa nếu một vector là 0
+
+    cosine_similarity = np.dot(point1, point2) / (norm1 * norm2)
+    return cosine_similarity  # Cosine distance
+
 
      
 def build_graph(tokens, window_size=2):
@@ -109,6 +224,7 @@ def textrank(graph, max_iter=100, damping=0.85):
     
     return nx.pagerank(graph, max_iter=max_iter, alpha=damping)
 
+
 # Extract keywords textrank:
 
 #     - Extract keywords based on threshold selection strategy.
@@ -119,9 +235,7 @@ def extract_keywords_textrank(text, strategy='relative', top_percent=0.1):
 
     graph = build_graph(tokens)  
     scores = textrank(graph)  
- 
-    top_n = max(1, int(len(tokens) * top_percent))
-    
+
     if strategy == 'relative':
         # Selcct top `top_percent` keywords by TextRank score
         sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
@@ -173,6 +287,16 @@ def summarize_text(text, keywords, top_n=3):
 
     return summary
 
+
+# - Bo sung them nhieu phuong phap summary: su dung Cue Words
+# - Phương pháp: Graph based methods
+# - Dựa trên kỹ thuật phân cụm
+#     + Số lượng câu hoặc % số câu tóm tắt so với văn bản gốc
+#     + 
+# - Tóm tắt dựa trên nhiều văn bản (tính cùng topic, cùng series)
+
+
+
 #Graph function with vertices as words and display the PageRank score on each vertex. 
 def plot_graph_with_scores(graph, scores):
     
@@ -199,70 +323,7 @@ def plot_graph_with_scores(graph, scores):
     #plt.show()
     st.pyplot(plt)
 
-#
-#............Xu ly cung luc nhieu tai lieu--------------
-#
-
-# Đọc tất cả các tài liệu từ folder_path
-def read_all_documents(folder_path):
-    documents = {}
-    for file_name in os.listdir(folder_path):
-        if file_name.endswith(".docx"):
-            file_path = os.path.join(folder_path, file_name)
-            text = read_docx_file(file_path)
-            documents[file_name] = text
-    return documents
-
-# Phân cụm các tài liệu
-def cluster_documents(documents, n_clusters=3):
-    vectorizer = TfidfVectorizer(stop_words=STOPWORDS)
-    doc_vectors = vectorizer.fit_transform(documents.values())
-    
-    # K-means clustering
-    kmeans = KMeans(n_clusters=n_clusters, random_state=0)
-    clusters = kmeans.fit_predict(doc_vectors)
-    
-    # Gắn nhãn cụm vào tài liệu
-    clustered_docs = {}
-    for doc_id, cluster in zip(documents.keys(), clusters):
-        if cluster not in clustered_docs:
-            clustered_docs[cluster] = []
-        clustered_docs[cluster].append((doc_id, documents[doc_id]))
-    
-    return clustered_docs
-
-#trich keyword nhieu tai lieu
-def extract_keywords_multiple_documents(documents, strategy='relative', top_percent=0.1):
-    keywords_by_document = {}
-    for doc_name, text in documents.items():
-        keywords = extract_keywords_textrank(text, strategy=strategy, top_percent=top_percent)
-        keywords_by_document[doc_name] = keywords
-    return keywords_by_document
-
-#Hiển thị keyword theo tài liệu
-def display_keywords(keywords_by_document):
-    for doc_name, keywords in keywords_by_document.items():
-        st.write(f"**Keywords for {doc_name}:**")
-        st.write([kw[0] for kw in keywords])
-
-#Tóm tắt nhiều tài liệu theo cụm
-def summarize_documents_by_cluster(clustered_docs, top_n=3):
-    summaries_by_cluster = {}
-    for cluster_id, docs in clustered_docs.items():
-        summaries = []
-        for doc_name, text in docs:
-            keywords = extract_keywords_textrank(text)
-            summary = summarize_text(text, keywords, top_n=top_n)
-            summaries.append((doc_name, summary))
-        summaries_by_cluster[cluster_id] = summaries
-    return summaries_by_cluster
-
-# Hiển thị tóm tắt theo cụm
-def display_summaries(summaries_by_cluster):
-    for cluster_id, summaries in summaries_by_cluster.items():
-        st.write(f"**Cluster {cluster_id} Summaries:**")
-        for doc_name, summary in summaries:
-            st.write(f"**{doc_name}:** {summary}")
+ 
 #graph = build_graph(tokens)   
 #scores = textrank(graph) 
 #plot_graph_with_scores(graph, scores)
@@ -328,12 +389,15 @@ def extract_keywords_keybert(model,text,top_percent=0.1):
     tokens = tokenize_and_filter(text)
     cleaned_text = preprocess_for_keybert(tokens)
 
-    # Initialize KeyBERT model 
+    # Initialize KeyBERT model
+    #kw_model = KeyBERT(model='paraphrase-MiniLM-L12-v2')  # Use optimized transformer model
     kw_model = get_keyword_model(model)
     # Calculate the number of keywords to extract (e.g., 10% of tokens)
     keyword_percentage = top_percent  # 10%
     num_keywords = max(1, int(len(tokens) * keyword_percentage))  # Ensure at least 1 keyword
-     
+    
+    # print("Number of tokens: ",len(tokens))
+    # print("Number of keywords ",num_keywords)
 
     # Extract keywords with MMR for diversity
     keywords_mmr = kw_model.extract_keywords(
@@ -346,51 +410,6 @@ def extract_keywords_keybert(model,text,top_percent=0.1):
     )
 
     return keywords_mmr
-
-# Trích xuất từ khóa từ nhiều tài liệu sử dụng KeyBERT
-def extract_keywords_keybert_multiple_documents(documents, model="all-MiniLM-L6-v2", top_percent=0.1):
-    keywords_by_document = {}
-    for doc_name, text in documents.items():
-        keywords = extract_keywords_keybert(model, text, top_percent=top_percent)
-        keywords_by_document[doc_name] = keywords
-    return keywords_by_document
-
-# Hiển thị từ khóa từ từng tài liệu
-def display_keywords_keybert(keywords_by_document):
-    for doc_name, keywords in keywords_by_document.items():
-        st.write(f"**Keywords for {doc_name}:**")
-        st.write([kw[0] for kw in keywords])
-
-def extract_keywords_by_cluster(clustered_docs, model="all-MiniLM-L6-v2", top_percent=0.1):
-    keywords_by_cluster = {}
-    for cluster_id, docs in clustered_docs.items():
-        combined_text = " ".join([text for _, text in docs])
-        keywords = extract_keywords_keybert(model, combined_text, top_percent=top_percent)
-        keywords_by_cluster[cluster_id] = keywords
-    return keywords_by_cluster
-
-# Hiển thị từ khóa theo từng cụm
-def display_keywords_by_cluster(keywords_by_cluster):
-    for cluster_id, keywords in keywords_by_cluster.items():
-        st.write(f"**Keywords for Cluster {cluster_id}:**")
-        st.write([kw[0] for kw in keywords])
-# Tóm tắt nhiều tài liệu trong cụm dựa trên từ khóa KeyBERT
-def summarize_documents_by_cluster_keybert(clustered_docs, model="all-MiniLM-L6-v2", top_percent=0.1, top_n=3):
-    summaries_by_cluster = {}
-    for cluster_id, docs in clustered_docs.items():
-        combined_text = " ".join([text for _, text in docs])
-        keywords = extract_keywords_keybert(model, combined_text, top_percent=top_percent)
-        
-        summary = summarize_text(combined_text, keywords, top_n=top_n)
-        summaries_by_cluster[cluster_id] = summary
-    return summaries_by_cluster
-
-# Hiển thị tóm tắt theo cụm
-def display_summaries_by_cluster(summaries_by_cluster):
-    for cluster_id, summary in summaries_by_cluster.items():
-        st.write(f"**Summary for Cluster {cluster_id}:**")
-        st.write(summary)
-
 
 
 
