@@ -33,11 +33,13 @@ st.set_page_config(page_title="Summary & Keywords Extraction", layout="wide")
     Project
     -	Objectif: building a module for keywords extraction
     -	Input: individual document
-    -	Output: keywords
+    -	Output: keywords, Summarize text
     -	Implementation plan
-        1.	Choosing one graph-based method to implement (TextRank for example).
-        2.	Implementing a KeyBERT method (using cosine similarity on BERT embedding method).
-        3.	Analyzing the obtained results.
+        1. Choosing TextRank a graph-based method to implement.
+        2. Implementing a KeyBERT method (using cosine similarity on BERT embedding method).
+        3. Analyzing the obtained results.
+        4. If upload multi-documents, you can setup number of clusters
+        5. Extraction keywords and summarize text for clusters.
 
     """
 @st.cache_resource  # Ensures the model loads only once
@@ -678,6 +680,21 @@ if uploaded_files:
                     if summary.get("title"):
                         st.markdown(f"**The title:** {summary['title']}")
                     st.write(summary["summary"]) 
+        if st.button("🚀 Graph TextRank and visualiz keywords keyBERT"): 
+            with st.spinner("Processing..."):
+                
+                # Built and show TextRank graph
+                tokens = tokenize_and_filter(doc_text)
+                graph = build_graph(tokens)
+                scores = textrank(graph)
+
+                st.markdown("### 📈 Graph TextRank")
+                plot_graph_with_scores(graph, scores)
+
+                # Built and show visualiz keywords keyBERT     
+                keywords_keybert= extract_keywords_keybert("paraphrase-mpnet-base-v2", doc_text, top_percent=top_percent) 
+                st.markdown("### 📈 visualiz keywords keyBERT")    
+                visualize_keywords(keywords_keybert)
 
         if st.button("🚀 Evalueate Textrank and keyBERT"): 
             with st.spinner("Processing..."):
